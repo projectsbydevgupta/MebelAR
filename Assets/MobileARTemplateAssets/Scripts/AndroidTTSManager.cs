@@ -93,10 +93,9 @@ public class AndroidTTSManager : MonoBehaviour
         try
         {
             using (var unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
+            using (var currentActivity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
+            using (var context = currentActivity.Call<AndroidJavaObject>("getApplicationContext"))
             {
-                var currentActivity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity");
-                var context = currentActivity.Call<AndroidJavaObject>("getApplicationContext");
-
                 var listener = new TTSOnInitListener(OnInitCompleted);
                 m_TTS = new AndroidJavaObject("android.speech.tts.TextToSpeech", context, listener);
                 m_Bundle = new AndroidJavaObject("android.os.Bundle");
@@ -122,16 +121,18 @@ public class AndroidTTSManager : MonoBehaviour
             try
             {
                 using (var localeClass = new AndroidJavaClass("java.util.Locale"))
+                using (var usLocale = localeClass.GetStatic<AndroidJavaObject>("US"))
                 {
-                    var usLocale = localeClass.GetStatic<AndroidJavaObject>("US");
                     int langResult = m_TTS.Call<int>("setLanguage", usLocale);
 
                     // LANG_MISSING_DATA = -1, LANG_NOT_SUPPORTED = -2
                     if (langResult == -1 || langResult == -2)
                     {
                         Debug.LogWarning("[AndroidTTSManager] US Locale not supported; falling back to default English.");
-                        var engLocale = localeClass.GetStatic<AndroidJavaObject>("ENGLISH");
-                        m_TTS.Call<int>("setLanguage", engLocale);
+                        using (var engLocale = localeClass.GetStatic<AndroidJavaObject>("ENGLISH"))
+                        {
+                            m_TTS.Call<int>("setLanguage", engLocale);
+                        }
                     }
                 }
 
@@ -256,6 +257,11 @@ public class AndroidTTSManager : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (s_Instance == this)
+        {
+            s_Instance = null;
+        }
+
 #if UNITY_ANDROID && !UNITY_EDITOR
         if (m_TTS != null)
         {
@@ -263,12 +269,22 @@ public class AndroidTTSManager : MonoBehaviour
             {
                 m_TTS.Call<int>("stop");
                 m_TTS.Call("shutdown");
-                m_TTS = null;
+                m_TTS.Dispose();
             }
             catch (Exception ex)
             {
                 Debug.LogError($"[AndroidTTSManager] Error shutting down TTS: {ex.Message}");
             }
+            finally
+            {
+                m_TTS = null;
+            }
+        }
+
+        if (m_Bundle != null)
+        {
+            m_Bundle.Dispose();
+            m_Bundle = null;
         }
 #endif
     }
